@@ -3,6 +3,40 @@
 All notable changes to this SDK are documented in this file. It was started at 0.2.0 and does not
 yet list every change made since 0.1.1.
 
+## [Unreleased]
+
+## [0.3.0] - 2026-11-16
+
+### Breaking changes
+
+- `AccountInfo.CreditsUsed` is now a `*float64`, nil when the API did not send the figure. The
+  API withholds usage from a key without the `analytics:read` scope, and 0.2.0 reported that as
+  `CreditsUsed: 0`, which reads as "spent nothing". Check for nil before reading it;
+  `AccountInfo.UsageWithheld` is true when the API said it withheld the figure.
+
+### Added
+
+- `AccountInfo.UsageWithheld` (from `withheld.usage`) and `AccountInfo.FreeGrant`
+  (`credits.free_grant`, `"withheld"` when another account had already received this mailbox's
+  one-time Free credits).
+- `VerificationResult.Enrichment`: the name, gender and country hints the API attaches when
+  `VerifyOptions.Enrich` is set on a plan with data enrichment. 0.2.0 sent the option and
+  dropped the answer.
+- `VerificationResult.FromCache`, `CacheAgeSeconds` and `VerifiedAt`, so a cached verdict says
+  how old it is.
+- `VerificationFlags.AbuseEmail`, `Complainer`, `Honeypot` and `BotGenerated`. The API lowers
+  the score for each without changing the status, so these say why a score is low.
+- `BatchJobResult.InvalidEmailsSkipped` (malformed addresses refused and not charged) and
+  `BatchJobResult.EnqueueUnknown` (queue sends that could not be confirmed; nil means not
+  reported, so read `Status` for whether any are unconfirmed).
+- `JobStatusResult.ErrorMessage`, the API's reason a job ended as it did. `WaitForJob` includes
+  it in the error for a failed job.
+
+### Fixed
+
+- A JSON `null` in a field read as an optional integer (such as `verification.smtp_code`) now
+  reads as nil, not as 0.
+
 ## [0.2.0] - 2026-11-11
 
 ### Changed

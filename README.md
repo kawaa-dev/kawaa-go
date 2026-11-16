@@ -107,6 +107,17 @@ result, err = client.Verify(ctx, "user@example.com", kawaa.VerifyOptions{
     SkipCache:  false,             // Bypass the verification cache
 })
 
+// Enrichment is set only when Enrich was requested on a plan that includes
+// it, and the API knew something about the address.
+if result.Enrichment != nil {
+    fmt.Printf("Country: %s\n", result.Enrichment.Country)
+}
+
+// A cached answer says how old it is.
+if result.FromCache && result.CacheAgeSeconds != nil {
+    fmt.Printf("Cached result, measured %d seconds ago\n", *result.CacheAgeSeconds)
+}
+
 // What it cost: 1 for a fresh check, 0.5 for a cached one. Credit figures
 // are float64 throughout the SDK, so print them with %g, not %d.
 if result.CreditsUsed != nil {
@@ -199,6 +210,10 @@ if err != nil {
 
 fmt.Printf("Job ID: %s\n", job.JobID)
 fmt.Printf("Duplicates removed: %d\n", job.DuplicatesRemoved)
+if job.InvalidEmailsSkipped != nil && *job.InvalidEmailsSkipped > 0 {
+    // Malformed addresses are skipped, not verified and not charged.
+    fmt.Printf("Malformed addresses skipped: %d\n", *job.InvalidEmailsSkipped)
+}
 if job.CreditsUsed != nil { // nil on a replay of a batch already accepted
     fmt.Printf("Credits used: %g\n", *job.CreditsUsed) // float64: cached checks cost 0.5
 }
@@ -481,12 +496,22 @@ if err != nil {
 fmt.Printf("Credits remaining: %g\n", account.CreditsRemaining) // e.g. 260.25
 fmt.Printf("Plan: %s\n", account.Plan)
 
-if account.AllowanceBasis == kawaa.AllowanceBillingPeriod && account.NextReset != "" {
-    fmt.Printf("Used %g of %g this billing period\n", account.CreditsUsed, account.MonthlyAllowance)
-} else {
-    fmt.Printf("Used %g in total\n", account.CreditsUsed) // nothing resets this on a schedule
+switch {
+case account.CreditsUsed == nil:
+    // Not reported: a key without the analytics:read scope is not shown usage.
+    fmt.Println("Usage not available to this key")
+case account.AllowanceBasis == kawaa.AllowanceBillingPeriod && account.NextReset != "":
+    fmt.Printf("Used %g of %g this billing period\n", *account.CreditsUsed, account.MonthlyAllowance)
+default:
+    fmt.Printf("Used %g in total\n", *account.CreditsUsed) // nothing resets this on a schedule
 }
 ```
+
+`CreditsUsed` is a `*float64`. It is nil when the API did not send the figure:
+the API withholds usage from a key without the `analytics:read` scope, and
+`UsageWithheld` is then true. Nil is "not reported", never "spent nothing".
+`FreeGrant` is `"withheld"` on the Free plan when another account had already
+received this mailbox's one-time free credits.
 
 `AllowanceBasis` says whether the allowance renews. `AllowanceBillingPeriod`
 means `CreditsUsed` is spend in the current billing period and `NextReset`
@@ -628,6 +653,10 @@ result, err := client.Verify(ctx, "user@example.com")
 | `CreditsRemaining` | *float64 | Balance after the charge. Nil means the API omitted it, not zero |
 | `CreditsHeld` | *float64 | Credit held while `Status` is pending |
 | `IdempotentReplay` | *bool | True when this answered a repeat of a request already accepted under the same key, and charged nothing more. `CreditsUsed` then reports what the original verification cost, read back from its job, or nil if the job's cache discount was still being applied |
+| `FromCache` | bool | True when the API answered from its verification cache (charged 0.5) |
+| `CacheAgeSeconds` | *int | How old a cached result is, in seconds. Set on every cache hit; nil otherwise |
+| `VerifiedAt` | string | When the verdict was measured. On a cache hit, the time of the original check |
+| `Enrichment` | *Enrichment | Name, gender and country hints (`FirstName`, `LastName`, `FullName`, `Gender`, `Country`, `CountryCode`) when `VerifyOptions.Enrich` was set on a plan with data enrichment. Nil when not asked for or nothing is known |
 
 ### VerificationFlags
 
@@ -638,6 +667,14 @@ result, err := client.Verify(ctx, "user@example.com")
 | `FreeProvider` | bool | Free email provider |
 | `CatchAll` | bool | `true` when the domain was seen to accept mail for any address (or the status is `catch_all`). `false` also when nothing measured it: read `CatchAllMeasured` |
 | `CatchAllMeasured` | bool | Whether catch-all was measured. `false` means `CatchAll` is unknown, not "not catch-all": no probe ran (a disposable address, no usable mail server, a server that refused the mailbox or never answered). Derived when the result is decoded; `DownloadRow` has the same pair |
+| `AbuseEmail` | bool | The local part matched an abuse, complaint-handling, feedback-loop, legal or blocklist-removal name (abuse@, postmaster@, feedback@), at any domain |
+| `Complainer` | bool | A complaint-handling mailbox at a reviewed anti-spam, feedback-loop or consumer-protection organization. Always comes with `AbuseEmail` |
+| `Honeypot` | bool | The API's `honeypot` flag |
+| `BotGenerated` | bool | The API's `bot_generated` flag |
+
+These four lower `Score` without changing `Status`, so read them to see why a
+score is low. The download export does not carry them: read them from
+`Verify` or from `GetJobStatus` results.
 
 ### JobStatusResult
 
@@ -654,6 +691,7 @@ result, err := client.Verify(ctx, "user@example.com")
 | `Results` | []VerificationResult | The first page of results (up to 100). `HasMore` is true when there are more; `DownloadResults` returns them all |
 | `CreditsCharged` | *float64 | Charged (or held) at acceptance |
 | `CreditsRefunded` | *float64 | Returned since; net cost is `CreditsCharged - CreditsRefunded` |
+| `ErrorMessage` | string | Why the job ended as it did (for example, why it failed). `WaitForJob` includes it in its error |
 
 ### DomainSearchResult
 

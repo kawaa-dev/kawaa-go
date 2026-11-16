@@ -1,6 +1,7 @@
 package kawaa
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
 )
@@ -53,6 +54,18 @@ type VerificationFlags struct {
 	// CatchAllMeasured to tell the two apart.
 	CatchAll bool `json:"catch_all"`
 	SpamTrap bool `json:"spam_trap"`
+	// AbuseEmail is true when the local part matched an abuse,
+	// complaint-handling, feedback-loop, legal or blocklist-removal name or
+	// pattern (abuse@, postmaster@, feedback@, ...), at any domain. A match on
+	// the address itself, not a finding about its owner.
+	AbuseEmail bool `json:"abuse_email"`
+	// Complainer is a narrower AbuseEmail: a complaint-handling mailbox at a
+	// reviewed anti-spam, feedback-loop or consumer-protection organization.
+	// Every address with Complainer set has AbuseEmail too.
+	Complainer bool `json:"complainer"`
+	// Honeypot and BotGenerated are the API's flags of the same names.
+	Honeypot     bool `json:"honeypot"`
+	BotGenerated bool `json:"bot_generated"`
 	// CatchAllMeasured is true when the API measured catch-all for this
 	// address: CatchAll false then means the domain was checked and does not
 	// accept every address. False means nothing measured it, so CatchAll
@@ -64,15 +77,28 @@ type VerificationFlags struct {
 }
 
 // UnmarshalJSON accepts both "role_account" (current API) and legacy "role" field.
+//
+// The abuse_email, complainer, honeypot and bot_generated flags are read
+// leniently: the verification has been charged by the time it is parsed, so
+// a value that is not a boolean reads as false rather than failing the
+// decode.
 func (f *VerificationFlags) UnmarshalJSON(data []byte) error {
 	type Alias VerificationFlags
 	aux := &struct {
 		*Alias
-		LegacyRole *bool `json:"role"`
+		LegacyRole   *bool           `json:"role"`
+		AbuseEmail   json.RawMessage `json:"abuse_email"`
+		Complainer   json.RawMessage `json:"complainer"`
+		Honeypot     json.RawMessage `json:"honeypot"`
+		BotGenerated json.RawMessage `json:"bot_generated"`
 	}{Alias: (*Alias)(f)}
 	if err := json.Unmarshal(data, aux); err != nil {
 		return err
 	}
+	f.AbuseEmail = isTrue(aux.AbuseEmail)
+	f.Complainer = isTrue(aux.Complainer)
+	f.Honeypot = isTrue(aux.Honeypot)
+	f.BotGenerated = isTrue(aux.BotGenerated)
 	// If role_account was not set but legacy "role" was, use the legacy value
 	if !f.Role && aux.LegacyRole != nil && *aux.LegacyRole {
 		f.Role = true
@@ -170,8 +196,12 @@ func optionalString(raw json.RawMessage) *string {
 
 // optionalInt reads a JSON integer, or nil when raw is absent, null or not an
 // integer.
+//
+// A JSON null is checked for first: `json.Unmarshal` treats null as a no-op
+// and returns no error, so decoding it straight into an int would report 0
+// for a value the API never stated.
 func optionalInt(raw json.RawMessage) *int {
-	if len(raw) == 0 {
+	if len(raw) == 0 || string(bytes.TrimSpace(raw)) == "null" {
 		return nil
 	}
 	var n int
@@ -179,6 +209,13 @@ func optionalInt(raw json.RawMessage) *int {
 		return nil
 	}
 	return &n
+}
+
+// isTrue reports whether raw is the JSON boolean true. Absent, null and any
+// other type read as false.
+func isTrue(raw json.RawMessage) bool {
+	b := optionalBool(raw)
+	return b != nil && *b
 }
 
 // VerificationResult represents the result of a single email verification.
@@ -238,6 +275,62 @@ type VerificationResult struct {
 	//
 	// Nil means the API said nothing either way; only a real boolean sets it.
 	IdempotentReplay *bool `json:"idempotent_replay,omitempty"`
+
+	// FromCache is true when the API answered from its verification cache
+	// (charged 0.5) instead of checking the mailbox again.
+	FromCache bool `json:"from_cache,omitempty"`
+	// CacheAgeSeconds is how old a cached result is, in seconds. Set on
+	// every cache hit, beside FromCache; nil otherwise. Without it a result
+	// reused from days ago reads exactly like one measured this second.
+	CacheAgeSeconds *int `json:"cache_age_seconds,omitempty"`
+	// VerifiedAt is when the verdict was measured (RFC 3339). On a cache hit
+	// it is the time of the original check, not of this call.
+	VerifiedAt string `json:"verified_at,omitempty"`
+	// Enrichment holds the name, gender and country hints the API attaches
+	// when the request set VerifyOptions.Enrich and the plan includes data
+	// enrichment (Business and up). Nil when the request did not ask for it,
+	// and when the API knows nothing about the address, which is not a
+	// judgement about the address.
+	Enrichment *Enrichment `json:"enrichment,omitempty"`
+}
+
+// Enrichment is the data enrichment the API attaches to a verification when
+// VerifyOptions.Enrich is set. Each field is empty when the API has no hint
+// for it.
+type Enrichment struct {
+	FirstName   string `json:"first_name,omitempty"`
+	LastName    string `json:"last_name,omitempty"`
+	FullName    string `json:"full_name,omitempty"`
+	Gender      string `json:"gender,omitempty"`
+	Country     string `json:"country,omitempty"`
+	CountryCode string `json:"country_code,omitempty"`
+}
+
+// optionalEnrichment reads the enrichment object leniently: nil when raw is
+// absent, null or not an object, and a field that is not a string reads as
+// empty rather than failing the decode of a charged verification.
+func optionalEnrichment(raw json.RawMessage) *Enrichment {
+	if len(raw) == 0 {
+		return nil
+	}
+	var fields map[string]json.RawMessage
+	if json.Unmarshal(raw, &fields) != nil || fields == nil {
+		return nil
+	}
+	text := func(name string) string {
+		if s := optionalString(fields[name]); s != nil {
+			return *s
+		}
+		return ""
+	}
+	return &Enrichment{
+		FirstName:   text("first_name"),
+		LastName:    text("last_name"),
+		FullName:    text("full_name"),
+		Gender:      text("gender"),
+		Country:     text("country"),
+		CountryCode: text("country_code"),
+	}
 }
 
 // UnmarshalJSON derives Flags.CatchAll from verification.catch_all or
@@ -260,6 +353,10 @@ func (r *VerificationResult) UnmarshalJSON(data []byte) error {
 		CreditsRemaining json.RawMessage `json:"credits_remaining"`
 		CreditsHeld      json.RawMessage `json:"credits_held"`
 		IdempotentReplay json.RawMessage `json:"idempotent_replay"`
+		FromCache        json.RawMessage `json:"from_cache"`
+		CacheAgeSeconds  json.RawMessage `json:"cache_age_seconds"`
+		VerifiedAt       json.RawMessage `json:"verified_at"`
+		Enrichment       json.RawMessage `json:"enrichment"`
 	}{Alias: (*Alias)(r)}
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
@@ -268,6 +365,13 @@ func (r *VerificationResult) UnmarshalJSON(data []byte) error {
 	r.CreditsRemaining = optionalNumber(aux.CreditsRemaining)
 	r.CreditsHeld = optionalNumber(aux.CreditsHeld)
 	r.IdempotentReplay = optionalBool(aux.IdempotentReplay)
+	r.FromCache = isTrue(aux.FromCache)
+	r.CacheAgeSeconds = optionalInt(aux.CacheAgeSeconds)
+	r.VerifiedAt = ""
+	if verifiedAt := optionalString(aux.VerifiedAt); verifiedAt != nil {
+		r.VerifiedAt = *verifiedAt
+	}
+	r.Enrichment = optionalEnrichment(aux.Enrichment)
 	if !r.Flags.CatchAll {
 		if (r.Verification != nil && r.Verification.CatchAll) || r.Status == StatusCatchAll {
 			r.Flags.CatchAll = true
@@ -382,6 +486,17 @@ type BatchJobResult struct {
 	// Nil means the API said nothing either way; only a real boolean sets it.
 	IdempotentReplay *bool  `json:"idempotent_replay,omitempty"`
 	Message          string `json:"message,omitempty"`
+	// InvalidEmailsSkipped is how many submitted addresses the API refused as
+	// malformed and never verified or charged: the job's results are that
+	// much shorter than the list you sent. Nil when the API did not report it.
+	InvalidEmailsSkipped *int `json:"invalid_emails_skipped,omitempty"`
+	// EnqueueUnknown is how many queue sends could not be confirmed. Their
+	// credits are in CreditsHeld, not spent: poll the job until it
+	// reconciles. Nil means the API did not report a count, not that every
+	// send was confirmed: a replay of a batch still in that state carries
+	// the status but no count. Status JobStatusEnqueueUnknown, or a positive
+	// count, is what says some sends are unconfirmed.
+	EnqueueUnknown *int `json:"enqueue_unknown,omitempty"`
 }
 
 // UnmarshalJSON reads the credit figures and the replay marker leniently, as
@@ -395,10 +510,12 @@ func (r *BatchJobResult) UnmarshalJSON(data []byte) error {
 	type Alias BatchJobResult
 	aux := struct {
 		*Alias
-		CreditsUsed      json.RawMessage `json:"credits_used"`
-		CreditsRemaining json.RawMessage `json:"credits_remaining"`
-		CreditsHeld      json.RawMessage `json:"credits_held"`
-		IdempotentReplay json.RawMessage `json:"idempotent_replay"`
+		CreditsUsed          json.RawMessage `json:"credits_used"`
+		CreditsRemaining     json.RawMessage `json:"credits_remaining"`
+		CreditsHeld          json.RawMessage `json:"credits_held"`
+		IdempotentReplay     json.RawMessage `json:"idempotent_replay"`
+		InvalidEmailsSkipped json.RawMessage `json:"invalid_emails_skipped"`
+		EnqueueUnknown       json.RawMessage `json:"enqueue_unknown"`
 	}{Alias: (*Alias)(r)}
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
@@ -407,6 +524,8 @@ func (r *BatchJobResult) UnmarshalJSON(data []byte) error {
 	r.CreditsRemaining = optionalNumber(aux.CreditsRemaining)
 	r.CreditsHeld = optionalNumber(aux.CreditsHeld)
 	r.IdempotentReplay = optionalBool(aux.IdempotentReplay)
+	r.InvalidEmailsSkipped = optionalInt(aux.InvalidEmailsSkipped)
+	r.EnqueueUnknown = optionalInt(aux.EnqueueUnknown)
 	if r.IdempotentReplay != nil && *r.IdempotentReplay {
 		r.CreditsUsed = nil
 	}
@@ -449,6 +568,10 @@ type JobStatusResult struct {
 	// results index had not caught up. The next read retries it, and until
 	// then the bill is not final.
 	CacheDiscountPending bool `json:"cache_discount_pending,omitempty"`
+	// ErrorMessage is why a job ended as it did, in the API's own words
+	// (error_message), for example on a failed job. Empty when the API gave
+	// no reason.
+	ErrorMessage string `json:"error_message,omitempty"`
 	// CreditsCharged is what the job was charged (or held) when it was
 	// accepted, and CreditsRefunded what has come back since: for failed or
 	// unqueued addresses, a cancellation, or the cache discount. The job's
@@ -685,7 +808,10 @@ type AccountInfo struct {
 	CreditsRemaining float64 `json:"credits_remaining"`
 	// CreditsUsed is spend in the current billing period only when
 	// AllowanceBasis is AllowanceBillingPeriod; otherwise it is cumulative.
-	CreditsUsed float64 `json:"credits_used"`
+	// Nil when the API did not send the figure: it withholds usage from a key
+	// without the analytics:read scope, and UsageWithheld is then true. Never
+	// 0 for "not reported": 0 reads as "spent nothing".
+	CreditsUsed *float64 `json:"credits_used,omitempty"`
 	// MonthlyAllowance is the plan's credit allowance (credits.monthly_allowance).
 	// It renews each billing period only when AllowanceBasis is
 	// AllowanceBillingPeriod; on Free it is the one-time grant.
@@ -698,6 +824,15 @@ type AccountInfo struct {
 	// predating the field): unknown, not renewing.
 	AllowanceBasis AllowanceBasis `json:"allowance_basis,omitempty"`
 	CreatedAt      string         `json:"created_at"`
+	// UsageWithheld is true when the API withheld CreditsUsed because this
+	// key is not scoped for usage (withheld.usage in the response).
+	// CreditsUsed is nil then.
+	UsageWithheld bool `json:"usage_withheld,omitempty"`
+	// FreeGrant is "withheld" on the Free plan when another account had
+	// already received this mailbox's one-time free credits
+	// (credits.free_grant), so MonthlyAllowance was not given to this
+	// account. Empty otherwise.
+	FreeGrant string `json:"free_grant,omitempty"`
 }
 
 // UnmarshalJSON maps the nested account/credits payload onto the flat
@@ -717,19 +852,24 @@ func (a *AccountInfo) UnmarshalJSON(data []byte) error {
 			// Pointers distinguish "absent" from a legitimate zero: a main
 			// account with used_this_month == 0 must NOT fall back to the
 			// sub-account-only credits_used field.
-			UsedThisMonth    *float64 `json:"used_this_month"`
-			CreditsUsed      *float64 `json:"credits_used"`
-			MonthlyAllowance float64  `json:"monthly_allowance"`
-			NextReset        string   `json:"next_reset"`
-			AllowanceBasis   string   `json:"allowance_basis"`
+			UsedThisMonth    *float64        `json:"used_this_month"`
+			CreditsUsed      *float64        `json:"credits_used"`
+			MonthlyAllowance float64         `json:"monthly_allowance"`
+			NextReset        string          `json:"next_reset"`
+			AllowanceBasis   string          `json:"allowance_basis"`
+			FreeGrant        json.RawMessage `json:"free_grant"`
 		} `json:"credits"`
+		// Sections the API left out because the key is not scoped for them.
+		Withheld *struct {
+			Usage json.RawMessage `json:"usage"`
+		} `json:"withheld"`
 		// Legacy flat fallback fields
-		UserID           string  `json:"user_id"`
-		Email            string  `json:"email"`
-		Plan             string  `json:"plan"`
-		CreditsRemaining float64 `json:"credits_remaining"`
-		CreditsUsed      float64 `json:"credits_used"`
-		CreatedAt        string  `json:"created_at"`
+		UserID           string   `json:"user_id"`
+		Email            string   `json:"email"`
+		Plan             string   `json:"plan"`
+		CreditsRemaining float64  `json:"credits_remaining"`
+		CreditsUsed      *float64 `json:"credits_used"`
+		CreatedAt        string   `json:"created_at"`
 	}
 	if err := json.Unmarshal(data, &raw); err != nil {
 		return err
@@ -756,19 +896,31 @@ func (a *AccountInfo) UnmarshalJSON(data []byte) error {
 		a.CreditsRemaining = raw.Credits.Balance
 		// Sub-accounts report credits_used instead of used_this_month.
 		// Presence (not zero-ness) decides which field applies: zero is a
-		// legitimate value for a main account that has used nothing.
+		// legitimate value for a main account that has used nothing. No 0
+		// fallback when neither is present: the API omits the figure for a
+		// key that is not scoped for usage, and a 0 would make "spent
+		// nothing" and "not allowed to see it" the same answer.
 		switch {
 		case raw.Credits.UsedThisMonth != nil:
-			a.CreditsUsed = *raw.Credits.UsedThisMonth
+			a.CreditsUsed = raw.Credits.UsedThisMonth
 		case raw.Credits.CreditsUsed != nil:
-			a.CreditsUsed = *raw.Credits.CreditsUsed
+			a.CreditsUsed = raw.Credits.CreditsUsed
+		case raw.CreditsUsed != nil:
+			a.CreditsUsed = raw.CreditsUsed
 		}
 		a.MonthlyAllowance = raw.Credits.MonthlyAllowance
 		a.NextReset = raw.Credits.NextReset
 		a.AllowanceBasis = AllowanceBasis(raw.Credits.AllowanceBasis)
+		if grant := optionalString(raw.Credits.FreeGrant); grant != nil {
+			a.FreeGrant = *grant
+		}
 	} else {
 		a.CreditsRemaining = raw.CreditsRemaining
 		a.CreditsUsed = raw.CreditsUsed
+	}
+	if a.CreditsUsed == nil && raw.Withheld != nil {
+		withheld := optionalBool(raw.Withheld.Usage)
+		a.UsageWithheld = withheld != nil && *withheld
 	}
 	// A sub-account's credits block carries only balance, credits_used and
 	// allocated, so the API sends no basis for it. Its plan is the declared

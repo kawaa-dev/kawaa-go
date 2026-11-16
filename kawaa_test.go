@@ -641,7 +641,8 @@ func TestAccountInfoNestedMapping(t *testing.T) {
 	assert.Equal(t, "professional", account.Plan)
 	assert.Equal(t, "active", account.Status)
 	assert.Equal(t, 1000.0, account.CreditsRemaining)
-	assert.Equal(t, 500.0, account.CreditsUsed)
+	require.NotNil(t, account.CreditsUsed)
+	assert.Equal(t, 500.0, *account.CreditsUsed)
 	assert.Equal(t, 10000.0, account.MonthlyAllowance)
 	assert.Equal(t, "2024-02-01T00:00:00Z", account.NextReset)
 	assert.Equal(t, "2024-01-01T00:00:00Z", account.CreatedAt)
@@ -888,7 +889,8 @@ func TestAccountInfoZeroUsedThisMonthIsNotTreatedAsMissing(t *testing.T) {
 	var account AccountInfo
 	require.NoError(t, json.Unmarshal(body, &account))
 
-	assert.Equal(t, 0.0, account.CreditsUsed)
+	require.NotNil(t, account.CreditsUsed)
+	assert.Equal(t, 0.0, *account.CreditsUsed)
 	assert.Equal(t, 5000.0, account.CreditsRemaining)
 
 	// Sub-account shape (no used_this_month) still maps credits_used.
@@ -898,7 +900,8 @@ func TestAccountInfoZeroUsedThisMonthIsNotTreatedAsMissing(t *testing.T) {
 	}`)
 	var subAccount AccountInfo
 	require.NoError(t, json.Unmarshal(sub, &subAccount))
-	assert.Equal(t, 25.0, subAccount.CreditsUsed)
+	require.NotNil(t, subAccount.CreditsUsed)
+	assert.Equal(t, 25.0, *subAccount.CreditsUsed)
 }
 
 // apiKeyInjectingTransport simulates a user-supplied RoundTripper (via

@@ -43,7 +43,7 @@ const (
 	DefaultPollTimeout = 5 * time.Minute
 
 	// SDKVersion is the current SDK version.
-	SDKVersion = "0.2.0"
+	SDKVersion = "0.3.0"
 )
 
 // Client is the Kawaa API client.
@@ -824,6 +824,9 @@ func (c *Client) WaitForJob(ctx context.Context, jobID string, pollInterval, tim
 		}
 
 		if status.IsFailed() {
+			if status.ErrorMessage != "" {
+				return nil, fmt.Errorf("job %s failed: %s", jobID, status.ErrorMessage)
+			}
 			return nil, fmt.Errorf("job %s failed", jobID)
 		}
 

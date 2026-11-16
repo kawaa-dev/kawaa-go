@@ -118,7 +118,11 @@ func main() {
 		fmt.Printf("Email: %s\n", account.Email)
 		fmt.Printf("Plan: %s\n", account.Plan)
 		fmt.Printf("Credits remaining: %g\n", account.CreditsRemaining) // fractional: a cached check costs 0.5
-		fmt.Printf("Credits used: %g\n", account.CreditsUsed)
+		if account.CreditsUsed != nil {
+			fmt.Printf("Credits used: %g\n", *account.CreditsUsed)
+		} else if account.UsageWithheld {
+			fmt.Println("Credits used: withheld (this key has no analytics:read scope)")
+		}
 	}
 
 	fmt.Println()

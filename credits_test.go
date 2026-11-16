@@ -42,7 +42,8 @@ func TestGetAccountReadsAFractionalBalance(t *testing.T) {
 	account, err := client.GetAccount(context.Background())
 	require.NoError(t, err)
 	assert.Equal(t, 260.25, account.CreditsRemaining)
-	assert.Equal(t, 39.75, account.CreditsUsed)
+	require.NotNil(t, account.CreditsUsed)
+	assert.Equal(t, 39.75, *account.CreditsUsed)
 	assert.Equal(t, 300.0, account.MonthlyAllowance)
 	assert.Equal(t, "starter", account.Plan)
 }
@@ -56,7 +57,8 @@ func TestGetAccountReadsASubAccountsFractionalSpend(t *testing.T) {
 	account, err := client.GetAccount(context.Background())
 	require.NoError(t, err)
 	assert.Equal(t, 99.5, account.CreditsRemaining)
-	assert.Equal(t, 25.5, account.CreditsUsed)
+	require.NotNil(t, account.CreditsUsed)
+	assert.Equal(t, 25.5, *account.CreditsUsed)
 }
 
 func TestVerifyBatchReadsFractionalCreditsAndKeepsTheJobID(t *testing.T) {
