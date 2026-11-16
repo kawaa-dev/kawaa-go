@@ -5,6 +5,17 @@ yet list every change made since 0.1.1.
 
 ## [Unreleased]
 
+## [0.3.1] - 2026-11-16
+
+### Fixed
+
+- README samples now run as copied or say what to replace. The client options sample did not
+  compile (`&http.Client{...}`); it now passes `&http.Client{Timeout: 60 * time.Second}`. The
+  batch sample says `CreditsUsed` is the up-front charge of 1 per address (a cached address is
+  refunded to 0.5 when the job completes), the webhook sample names the endpoint you must
+  supply, and the `Find` sample says `example.org` is refused. The only code change is
+  `SDKVersion`, which the User-Agent sends.
+
 ## [0.3.0] - 2026-11-16
 
 ### Breaking changes

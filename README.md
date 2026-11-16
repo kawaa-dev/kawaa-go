@@ -215,7 +215,9 @@ if job.InvalidEmailsSkipped != nil && *job.InvalidEmailsSkipped > 0 {
     fmt.Printf("Malformed addresses skipped: %d\n", *job.InvalidEmailsSkipped)
 }
 if job.CreditsUsed != nil { // nil on a replay of a batch already accepted
-    fmt.Printf("Credits used: %g\n", *job.CreditsUsed) // float64: cached checks cost 0.5
+    // Charged up front, 1 per address. A cached address is refunded to 0.5
+    // when the job completes: GetJobStatus reports CreditsRefunded.
+    fmt.Printf("Credits used: %g\n", *job.CreditsUsed)
 }
 
 // Wait for completion
@@ -252,6 +254,8 @@ result, err := client.VerifyBatchAndWait(ctx, emails, 2*time.Second, 10*time.Min
 ```go
 // Get notified when job completes. Verification options you leave out keep
 // the API's defaults (deep verification and AI on).
+// Use your own HTTPS endpoint: the API looks the host up and refuses one that does
+// not resolve (400 WEBHOOK_URL_INVALID, nothing charged).
 job, err := client.VerifyBatch(ctx, emails, kawaa.BatchOptions{
     WebhookURL:    "https://hooks.example.com/kawaa",
     WebhookSecret: "your-secret",  // Optional, for signature verification
@@ -591,6 +595,8 @@ with it and the API replays the attempt that was charged instead of charging
 again:
 
 ```go
+// Use the company's real domain: example.com and example.org are refused (400,
+// nothing charged).
 result, err := client.Find(ctx, "Ada", "Lovelace", "example.org")
 if err != nil {
     if key := kawaa.IdempotencyKeyOf(err); key != "" {
@@ -607,7 +613,7 @@ client := kawaa.NewClient("your-api-key",
     kawaa.WithBaseURL("https://api.kawaa.com"),  // Custom API URL
     kawaa.WithTimeout(30 * time.Second),          // Request timeout
     kawaa.WithMaxRetries(3),                      // Retries after the first attempt (0 = send once)
-    kawaa.WithHTTPClient(&http.Client{...}),      // Custom HTTP client
+    kawaa.WithHTTPClient(&http.Client{Timeout: 60 * time.Second}), // Custom HTTP client
 )
 ```
 
