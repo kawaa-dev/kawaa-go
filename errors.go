@@ -12,8 +12,12 @@ import (
 
 // MaxRetryAfter is the longest this client waits before an automatic retry
 // when the API names a delay (the Retry-After header, or the error body's
-// retry_after_seconds). A longer value is waited for this long instead; the
-// value itself is still reported unchanged on APIError.RetryAfter.
+// retry_after_seconds). When the API asks for longer, the call is not
+// retried: the *APIError is returned at once, with the API's own value on
+// APIError.RetryAfter, and a longer wait is the caller's to make. Up to
+// v0.3.1 the client waited MaxRetryAfter and tried again, so an address the
+// API edge had refused for 3,900 seconds held each call for about three
+// minutes before the same error.
 const MaxRetryAfter = 60 * time.Second
 
 // APIError represents an error returned by the Kawaa API.
@@ -32,8 +36,8 @@ type APIError struct {
 	RequestID  string `json:"request_id,omitempty"`
 	// RetryAfter is how many seconds the API asked the caller to wait: the
 	// body's retry_after_seconds, or else the Retry-After header (0 when
-	// neither carries a usable value). It is the API's own value; this
-	// client's automatic retries wait at most MaxRetryAfter.
+	// neither carries a usable value). It is the API's own value. When it is
+	// longer than MaxRetryAfter, this client did not retry the call.
 	RetryAfter int `json:"-"`
 	// Retryable is the API's answer to "can the same request succeed if it
 	// is sent again after a wait?". Nil when the API did not say (it leaves
@@ -60,8 +64,11 @@ type APIError struct {
 
 	// serverDelay is the wait the response named for a retry, already
 	// limited to MaxRetryAfter; hasServerDelay is false when it named none.
-	serverDelay    time.Duration
-	hasServerDelay bool
+	// serverDelayOverCap is true when the named wait was longer than
+	// MaxRetryAfter: such an answer is not retried.
+	serverDelay        time.Duration
+	hasServerDelay     bool
+	serverDelayOverCap bool
 }
 
 func (e *APIError) Error() string {
@@ -250,8 +257,10 @@ func parseAPIError(statusCode int, body []byte, header http.Header) *APIError {
 	switch {
 	case headerOK:
 		apiErr.serverDelay, apiErr.hasServerDelay = clampRetryAfter(headerSeconds), true
+		apiErr.serverDelayOverCap = headerSeconds > MaxRetryAfter.Seconds()
 	case bodyOK:
 		apiErr.serverDelay, apiErr.hasServerDelay = clampRetryAfter(bodySeconds), true
+		apiErr.serverDelayOverCap = bodySeconds > MaxRetryAfter.Seconds()
 	}
 
 	// Set default message based on status code

@@ -43,7 +43,7 @@ const (
 	DefaultPollTimeout = 5 * time.Minute
 
 	// SDKVersion is the current SDK version.
-	SDKVersion = "0.3.1"
+	SDKVersion = "0.3.2"
 )
 
 // Client is the Kawaa API client.
@@ -201,8 +201,9 @@ func (c *Client) request(ctx context.Context, method, path string, body interfac
 // may charge again (retry_may_charge_again).
 //
 // The wait before a retry is the delay the API named (Retry-After, or the
-// body's retry_after_seconds), at most MaxRetryAfter, or else exponential
-// backoff.
+// body's retry_after_seconds), or else exponential backoff. An answer that
+// names a delay longer than MaxRetryAfter is not retried at all: waiting
+// less than the API asked would only be refused again.
 //
 // Every error it returns carries the call's key: an *APIError with
 // IdempotencyKey set, or a *RequestError for anything else.
@@ -283,6 +284,12 @@ func (c *Client) retryAfterFailure(err error, attempt int, keyed, replaySafe boo
 	default:
 		// A client error, or a 5xx on a charging request that may already
 		// have been charged: surface it unchanged.
+		return 0, false
+	}
+	if apiErr.serverDelayOverCap {
+		// The API asked for a longer wait than this client makes on its
+		// own (the API edge refuses a blocked address for 3,900 seconds):
+		// returned at once with the API's value on RetryAfter.
 		return 0, false
 	}
 	return c.retryDelay(apiErr, attempt), true
