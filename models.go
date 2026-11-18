@@ -292,6 +292,13 @@ type VerificationResult struct {
 	// and when the API knows nothing about the address, which is not a
 	// judgement about the address.
 	Enrichment *Enrichment `json:"enrichment,omitempty"`
+	// EmailUnicode is Email with an internationalized domain written back in
+	// its standard Unicode spelling ("info@müller.de" where Email is
+	// "info@xn--mller-kva.de"), the same as Email for every other address
+	// (email_unicode). The API checks and returns the ASCII form, so this is
+	// what to match a row to your own list by, ignoring case. Set on job result rows (GetJobStatus with results, WaitForJob)
+	// (every row from November 17, 2026); empty on older rows and on a single Verify answer.
+	EmailUnicode string `json:"email_unicode,omitempty"`
 }
 
 // Enrichment is the data enrichment the API attaches to a verification when
@@ -357,6 +364,7 @@ func (r *VerificationResult) UnmarshalJSON(data []byte) error {
 		CacheAgeSeconds  json.RawMessage `json:"cache_age_seconds"`
 		VerifiedAt       json.RawMessage `json:"verified_at"`
 		Enrichment       json.RawMessage `json:"enrichment"`
+		EmailUnicode     json.RawMessage `json:"email_unicode"`
 	}{Alias: (*Alias)(r)}
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
@@ -372,6 +380,10 @@ func (r *VerificationResult) UnmarshalJSON(data []byte) error {
 		r.VerifiedAt = *verifiedAt
 	}
 	r.Enrichment = optionalEnrichment(aux.Enrichment)
+	r.EmailUnicode = ""
+	if emailUnicode := optionalString(aux.EmailUnicode); emailUnicode != nil {
+		r.EmailUnicode = *emailUnicode
+	}
 	if !r.Flags.CatchAll {
 		if (r.Verification != nil && r.Verification.CatchAll) || r.Status == StatusCatchAll {
 			r.Flags.CatchAll = true
@@ -674,7 +686,8 @@ func (r *JobStatusResult) IsSettled() bool {
 // DownloadRow is a single flat row from GET /v1/jobs/{id}/download (the
 // download endpoint exports flat rows, not the nested VerificationResult
 // shape): {email, status, score, disposable, role, free_provider,
-// catch_all, suggestion, mx_records, smtp_response, verified_at, sub_status}.
+// catch_all, suggestion, mx_records, smtp_response, verified_at, sub_status,
+// email_unicode}.
 type DownloadRow struct {
 	Email        string             `json:"email"`
 	Status       VerificationStatus `json:"status"`
@@ -698,6 +711,13 @@ type DownloadRow struct {
 	// disposable or spam-trap verdict whose DNS lookups answered; one whose
 	// lookup failed carries "temporary_failure".
 	SubStatus string `json:"sub_status,omitempty"`
+	// EmailUnicode is Email with an internationalized domain written back in
+	// its standard Unicode spelling ("info@müller.de" where Email is
+	// "info@xn--mller-kva.de"), the same as Email for every other address
+	// (email_unicode). The API checks and returns the ASCII form, so this is
+	// what to match a row to your own list by, ignoring case. Set on download rows
+	// (every row from November 17, 2026); empty on older rows.
+	EmailUnicode string `json:"email_unicode,omitempty"`
 }
 
 // UnmarshalJSON reads catch_all leniently and records whether the row stated
@@ -707,10 +727,15 @@ func (r *DownloadRow) UnmarshalJSON(data []byte) error {
 	type Alias DownloadRow
 	aux := struct {
 		*Alias
-		CatchAll json.RawMessage `json:"catch_all"`
+		CatchAll     json.RawMessage `json:"catch_all"`
+		EmailUnicode json.RawMessage `json:"email_unicode"`
 	}{Alias: (*Alias)(r)}
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
+	}
+	r.EmailUnicode = ""
+	if emailUnicode := optionalString(aux.EmailUnicode); emailUnicode != nil {
+		r.EmailUnicode = *emailUnicode
 	}
 	catchAll := optionalBool(aux.CatchAll)
 	r.CatchAll = (catchAll != nil && *catchAll) || r.Status == StatusCatchAll

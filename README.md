@@ -275,6 +275,18 @@ for _, r := range results.Results {
     fmt.Printf("%s: %s\n", r.Email, r.Status)
 }
 
+// Match each row back to your own list. Email is the address as checked,
+// with an internationalized domain in its ASCII form (info@xn--mller-kva.de);
+// EmailUnicode writes that domain back in Unicode (info@müller.de). Both are
+// lower case: index both, and look up your own address lower-cased.
+byAddress := map[string]kawaa.DownloadRow{}
+for _, r := range results.Results {
+    byAddress[r.Email] = r
+    if r.EmailUnicode != "" {
+        byAddress[r.EmailUnicode] = r
+    }
+}
+
 // Download as CSV
 csvData, err := client.DownloadResultsCSV(ctx, jobID)
 if err != nil {

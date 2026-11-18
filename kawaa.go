@@ -43,7 +43,7 @@ const (
 	DefaultPollTimeout = 5 * time.Minute
 
 	// SDKVersion is the current SDK version.
-	SDKVersion = "0.3.2"
+	SDKVersion = "0.3.3"
 )
 
 // Client is the Kawaa API client.

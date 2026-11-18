@@ -5,6 +5,18 @@ yet list every change made since 0.1.1.
 
 ## [Unreleased]
 
+## [0.3.3] - 2026-11-18
+
+### Added
+
+- `VerificationResult.EmailUnicode` and `DownloadRow.EmailUnicode`: a job result row
+  (`GetJobStatus` with results, `WaitForJob`) and a download row (`DownloadResults`) now carry
+  the API's `email_unicode`, the address with an internationalized domain written back in
+  Unicode (`info@müller.de` where `Email` is `info@xn--mller-kva.de`), the same as `Email` for
+  every other address. The API checks and returns the ASCII form, so this is the field to match
+  a row to your own list by. Before, the client dropped it. Empty on rows the API wrote before
+  November 17, 2026. A value that is not a string reads as empty and does not fail the decode.
+
 ## [0.3.2] - 2026-11-17
 
 ### Changed
