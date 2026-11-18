@@ -5,6 +5,20 @@ yet list every change made since 0.1.1.
 
 ## [Unreleased]
 
+## [0.3.4] - 2026-11-18
+
+### Added
+
+- `DownloadRow.AbuseEmail`, `DownloadRow.Complainer` and `DownloadRow.BotGenerated`: the download
+  gained these risk flags as its last three columns, after `email_unicode`. Each is a `*bool`,
+  nil when the row does not state it (a result stored before the column existed has none), so an
+  unstated flag never reads as a confident `false`. A value that is not a boolean reads as nil
+  and does not fail the decode. There is no honeypot column. `DownloadResultsCSV` returns the
+  new columns as sent.
+- The reason `ip_address_mx` (a `risky` result: the mailbox was accepted at an MX record that
+  names an IP address) reaches `SubStatus` as sent. `SubStatus` is an open string, so a reason
+  added later passes through the same way.
+
 ## [0.3.3] - 2026-11-18
 
 ### Added
@@ -14,8 +28,9 @@ yet list every change made since 0.1.1.
   the API's `email_unicode`, the address with an internationalized domain written back in
   Unicode (`info@müller.de` where `Email` is `info@xn--mller-kva.de`), the same as `Email` for
   every other address. The API checks and returns the ASCII form, so this is the field to match
-  a row to your own list by. Before, the client dropped it. Empty on rows the API wrote before
-  November 17, 2026. A value that is not a string reads as empty and does not fail the decode.
+  a row to your own list by. Before, the client dropped it. The API sends it on every row it
+  serves, including rows of older jobs. A value that is not a string reads as empty and does not
+  fail the decode.
 
 ## [0.3.2] - 2026-11-17
 

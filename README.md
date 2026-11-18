@@ -691,8 +691,10 @@ result, err := client.Verify(ctx, "user@example.com")
 | `BotGenerated` | bool | The API's `bot_generated` flag |
 
 These four lower `Score` without changing `Status`, so read them to see why a
-score is low. The download export does not carry them: read them from
-`Verify` or from `GetJobStatus` results.
+score is low. A download row (`DownloadRow`) carries three of them as its last
+columns: `AbuseEmail`, `Complainer` and `BotGenerated`, each a `*bool` that is
+nil when the row does not state it (a result stored before those columns
+existed). There is no honeypot column.
 
 ### JobStatusResult
 

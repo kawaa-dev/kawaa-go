@@ -296,8 +296,9 @@ type VerificationResult struct {
 	// its standard Unicode spelling ("info@müller.de" where Email is
 	// "info@xn--mller-kva.de"), the same as Email for every other address
 	// (email_unicode). The API checks and returns the ASCII form, so this is
-	// what to match a row to your own list by, ignoring case. Set on job result rows (GetJobStatus with results, WaitForJob)
-	// (every row from November 17, 2026); empty on older rows and on a single Verify answer.
+	// what to match a row to your own list by, ignoring case. Set on every
+	// job result row (GetJobStatus with results, WaitForJob), including rows
+	// of older jobs; empty on a single Verify answer, which does not carry it.
 	EmailUnicode string `json:"email_unicode,omitempty"`
 }
 
@@ -687,7 +688,7 @@ func (r *JobStatusResult) IsSettled() bool {
 // download endpoint exports flat rows, not the nested VerificationResult
 // shape): {email, status, score, disposable, role, free_provider,
 // catch_all, suggestion, mx_records, smtp_response, verified_at, sub_status,
-// email_unicode}.
+// email_unicode, abuse_email, complainer, bot_generated}.
 type DownloadRow struct {
 	Email        string             `json:"email"`
 	Status       VerificationStatus `json:"status"`
@@ -715,9 +716,17 @@ type DownloadRow struct {
 	// its standard Unicode spelling ("info@müller.de" where Email is
 	// "info@xn--mller-kva.de"), the same as Email for every other address
 	// (email_unicode). The API checks and returns the ASCII form, so this is
-	// what to match a row to your own list by, ignoring case. Set on download rows
-	// (every row from November 17, 2026); empty on older rows.
+	// what to match a row to your own list by, ignoring case. Set on every
+	// download row, including rows of older jobs.
 	EmailUnicode string `json:"email_unicode,omitempty"`
+	// AbuseEmail, Complainer and BotGenerated are the download's last three
+	// columns: the risk flags of VerificationFlags with the same names (there
+	// is no honeypot column). Each is nil when the row does not state it, as
+	// for a result stored before the column existed: not stated, never a
+	// confident false. A value that is not a boolean reads as nil.
+	AbuseEmail   *bool `json:"abuse_email,omitempty"`
+	Complainer   *bool `json:"complainer,omitempty"`
+	BotGenerated *bool `json:"bot_generated,omitempty"`
 }
 
 // UnmarshalJSON reads catch_all leniently and records whether the row stated
@@ -729,10 +738,16 @@ func (r *DownloadRow) UnmarshalJSON(data []byte) error {
 		*Alias
 		CatchAll     json.RawMessage `json:"catch_all"`
 		EmailUnicode json.RawMessage `json:"email_unicode"`
+		AbuseEmail   json.RawMessage `json:"abuse_email"`
+		Complainer   json.RawMessage `json:"complainer"`
+		BotGenerated json.RawMessage `json:"bot_generated"`
 	}{Alias: (*Alias)(r)}
 	if err := json.Unmarshal(data, &aux); err != nil {
 		return err
 	}
+	r.AbuseEmail = optionalBool(aux.AbuseEmail)
+	r.Complainer = optionalBool(aux.Complainer)
+	r.BotGenerated = optionalBool(aux.BotGenerated)
 	r.EmailUnicode = ""
 	if emailUnicode := optionalString(aux.EmailUnicode); emailUnicode != nil {
 		r.EmailUnicode = *emailUnicode
